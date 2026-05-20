@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
+from fitness_coach.config import get_trace_config
 from fitness_coach.hub import build as build_hub
 
 # ── Session store (in-memory; resets on server restart) ───────────────────────
@@ -61,7 +62,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     session.history.append(HumanMessage(content=user_input))
 
-    result = build_hub().invoke({"messages": session.history})
+    result = build_hub().invoke({"messages": session.history}, config=get_trace_config(session_id))
 
     route    = result.get("route", "—")
     response = result.get("response") or ""

@@ -2,6 +2,7 @@ from functools import lru_cache
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
@@ -82,9 +83,9 @@ def _coach(state: AgentState) -> dict:
     return coach.run(state)
 
 
-def _generator(state: AgentState) -> dict:
+def _generator(state: AgentState, config: RunnableConfig) -> dict:
     from fitness_coach.agents import generator
-    return generator.run(state)
+    return generator.run(state, config)
 
 
 def _logger(state: AgentState) -> dict:

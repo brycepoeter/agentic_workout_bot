@@ -1,12 +1,13 @@
 """Interactive CLI demo — run with: python -m fitness_coach.demo"""
 import sys
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from fitness_coach.config import provider_label
+from fitness_coach.config import get_trace_config, provider_label
 from fitness_coach.hub import build
 
 console = Console()
@@ -35,6 +36,7 @@ def main() -> None:
 
     hub = build()
     history: list = []
+    session_id = str(uuid4())  # groups all turns in this CLI session in Langfuse
     # When the hub detects a probable topic change it asks the user to confirm.
     # We hold the original message here until they answer.
     pending_message: str | None = None
@@ -91,7 +93,7 @@ def main() -> None:
 
         with console.status("[dim]Thinking...[/dim]", spinner="dots"):
             try:
-                result = hub.invoke({"messages": history})
+                result = hub.invoke({"messages": history}, config=get_trace_config(session_id))
             except Exception as exc:  # noqa: BLE001
                 console.print(f"[red]Error:[/red] {exc}")
                 history.pop()  # don't keep a message that produced an error
