@@ -6,7 +6,13 @@ A hub-and-spoke multi-agent fitness coaching system built with LangGraph and Lan
 
 ## Demo
 
-<!-- Add a brief description of what the recording shows, then embed your video below -->
+Check out a few of the routes in action!
+
+
+https://github.com/user-attachments/assets/97b2d227-d310-49cb-b2bd-e87ac58fd85f
+
+
+
 
 ---
 
@@ -117,4 +123,8 @@ The unit tests cover the router's decision logic (mocked LLM), all data-layer se
 
 ## How I Would Evaluate This System in Production
 
-<!-- Write your evaluation section here -->
+I would make heavy use of the Langfuse integration. That's where we'll see what routes users are hitting most often, what our costs and latency are, which types of questions get asked the most. This gives us insight into what type of answer caching strategy we might want to employ (e.g. if many users are asking for the same workouts, do we need to use the LLM each time?). This will also allow us to evaluate the two-tiered LLM solution. Is the speed and cost tradeoff worth it? Do we want to get more granular with how we choose models? Perhaps some models perform better in different agentic tasks and we could get even more intentional about which ones we use. 
+
+This would also give us the chance to evaluate how many LLM calls we're making. My gut sense from looking at the Langfuse dashboard is that my app is making too many calls and is too expensive. It's only a few cents per session, but that adds up. Perhaps there are improvements to be made in the new topic recognition. Or perhaps there are other ways to streamline the call sequencing. But having our call traces there is what will empower us to analyze data about the user flows and make changes to improve the user experience and the cost to us as providers.
+
+I would also evaluate the system along classic software engineering dimensions. How many requests is our API gateway handling? How are our containers performing? What are our cloud costs? What kind of latency are we experiencing in the non-AI portions of the app? These impact the user experience greatly, and if we only focus on the core AI portion, we will miss some of the opportunities to make it better. 
