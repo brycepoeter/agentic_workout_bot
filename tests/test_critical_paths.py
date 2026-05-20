@@ -1,7 +1,15 @@
 """
 Critical path tests.
 
-Two paths were chosen for their highest practical impact:
+THE MOST IMPORTANT PROCESS: Routing
+    Every user message passes through the router before anything else happens.
+    A misroute means the wrong agent runs — a log request generates a workout,
+    a coaching question triggers the logger, or an ambiguous input silently
+    falls through. The router unit tests (no LLM required) lock down the exact
+    decision logic: which route each input produces, what happens when the
+    LLM's confidence is too low, and how edge cases like cold-start NEW_TOPIC
+    are handled. These tests mock the LLM so they run in milliseconds and
+    never flake due to model variation.
 
 Path 1 — Workout log end-to-end
     The most frequent user action in a fitness app. Exercises every layer of the
@@ -14,22 +22,89 @@ Path 2 — Generator graceful degradation
     that clearly rather than hallucinate exercises. A hallucinated workout is
     worse than no workout — it erodes trust and could cause injury.
 
-The data-layer tests at the bottom require no LLM and run in milliseconds.
-They guard the search and fuzzy-match logic that both critical paths depend on.
+The data-layer and tool-contract tests require no LLM and run in milliseconds.
+They guard the search, fuzzy-match, and tool error-handling logic that all
+critical paths depend on.
 """
 
 import json
+from unittest.mock import MagicMock, patch
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from fitness_coach.data import EXERCISES, KNOWN_EQUIPMENT, fuzzy_match, search
-from fitness_coach.hub import build as build_hub
+from fitness_coach.hub import RouteDecision, _pick_route, build as build_hub
+from fitness_coach.state import AgentState
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def invoke(text: str) -> dict:
     return build_hub().invoke({"messages": [HumanMessage(content=text)]})
+
+
+def _mock_llm(route: str, confidence: float = 0.95) -> MagicMock:
+    """Return a mock LLM whose structured-output chain yields the given RouteDecision."""
+    decision = RouteDecision(route=route, confidence=confidence)
+    mock = MagicMock()
+    mock.with_structured_output.return_value.invoke.return_value = decision
+    return mock
+
+
+def _state(*messages: str) -> AgentState:
+    return {"messages": [HumanMessage(content=m) for m in messages]}
+
+
+# ── Router unit tests (no LLM) ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("route", ["COACH", "WORKOUT_GENERATE", "WORKOUT_LOG", "CLARIFY"])
+def test_router_passes_through_decided_routes(route):
+    from fitness_coach.hub import _router
+    with patch("fitness_coach.hub.get_fast_llm", return_value=_mock_llm(route)):
+        result = _router(_state("anything"))
+    assert result["route"] == route
+    assert result["confidence"] == 0.95
+
+
+def test_router_low_confidence_overrides_to_clarify():
+    from fitness_coach.hub import _router
+    # LLM says COACH but at 0.60 — below the 0.75 threshold
+    with patch("fitness_coach.hub.get_fast_llm", return_value=_mock_llm("COACH", confidence=0.60)):
+        result = _router(_state("bench press"))
+    assert result["route"] == "CLARIFY"
+    assert result["confidence"] == 0.60  # raw score preserved; route is overridden
+
+
+def test_router_confidence_at_threshold_is_accepted():
+    from fitness_coach.hub import _router
+    with patch("fitness_coach.hub.get_fast_llm", return_value=_mock_llm("WORKOUT_LOG", confidence=0.75)):
+        result = _router(_state("I did squats"))
+    assert result["route"] == "WORKOUT_LOG"
+
+
+def test_pick_route_new_topic_cold_start_falls_back_to_clarify():
+    # NEW_TOPIC on the very first message has no prior history to switch away from;
+    # routing it to confirm_topic_change would confuse the user.
+    state = _state("build me a chest workout")  # 1 message — cold start
+    state["route"] = "NEW_TOPIC"
+    assert _pick_route(state) == "CLARIFY"
+
+
+def test_pick_route_new_topic_with_history_passes_through():
+    state: AgentState = {
+        "messages": [
+            HumanMessage(content="what muscles does a deadlift work?"),
+            AIMessage(content="Deadlifts primarily target the posterior chain…"),
+            HumanMessage(content="build me a chest workout"),
+        ],
+        "route": "NEW_TOPIC",
+    }
+    assert _pick_route(state) == "NEW_TOPIC"
+
+
+def test_pick_route_defaults_to_clarify_when_route_missing():
+    # route key absent entirely — happens if the router node never ran
+    assert _pick_route({"messages": []}) == "CLARIFY"  # type: ignore[arg-type]
 
 
 # ── Critical Path 1: Workout log end-to-end ───────────────────────────────────
@@ -186,3 +261,29 @@ def test_logger_format_response_empty():
     output = json.loads(_format_response([]))
     assert output["logged"] == []
     assert "message" in output
+
+
+# ── build_workout invalid input handling (no LLM) ─────────────────────────────
+
+def test_build_workout_unknown_exercise_id():
+    from fitness_coach.agents.generator import build_workout
+    result = json.loads(build_workout.invoke({
+        "warmup": [{"exercise_id": "not-a-real-uuid", "sets": 3, "rest_seconds": 60}],
+        "main": [],
+        "cooldown": [],
+    }))
+    assert "error" in result
+    assert "not-a-real-uuid" in result["error"]
+
+
+def test_build_workout_invalid_schema():
+    from fitness_coach.agents.generator import build_workout
+    # Call the underlying function directly, bypassing BuildInput validation,
+    # to confirm our try/except produces a clean JSON error instead of a raw exception.
+    result = json.loads(build_workout.func(
+        warmup=[{"exercise_id": "some-id"}],  # missing required 'sets'
+        main=[],
+        cooldown=[],
+    ))
+    assert "error" in result
+    assert "warmup" in result["error"]
