@@ -67,28 +67,12 @@ _EXTRACT_SYSTEM = SystemMessage(
 
 
 def _format_response(entries: list[LogEntry]) -> str:
+    import json
     if not entries:
-        return "I couldn't identify any exercises to log from our conversation."
-    lines = ["Logged! Here's what I recorded:\n"]
-    for entry in entries:
-        name = entry.matched_name or entry.exercise_name_raw
-        detail_parts = []
-        if entry.sets:
-            detail_parts.append(f"{entry.sets} sets")
-        if entry.reps:
-            detail_parts.append(f"× {entry.reps} reps")
-        if entry.weight_lbs:
-            w = int(entry.weight_lbs) if entry.weight_lbs == int(entry.weight_lbs) else entry.weight_lbs
-            detail_parts.append(f"@ {w} lbs")
-        if entry.duration_seconds:
-            detail_parts.append(f"for {entry.duration_seconds}s")
-        line = f"• {name}"
-        if detail_parts:
-            line += " — " + " ".join(detail_parts)
-        lines.append(line)
-        if entry.matched_name and entry.exercise_name_raw.lower() not in entry.matched_name.lower():
-            lines.append(f'  (matched "{entry.exercise_name_raw}" → "{entry.matched_name}")')
-    return "\n".join(lines)
+        return json.dumps({"logged": [], "message": "No exercises identified in the conversation."})
+    return json.dumps({
+        "logged": [entry.model_dump(exclude_none=True) for entry in entries]
+    }, indent=2)
 
 
 def _run(state: AgentState) -> dict:

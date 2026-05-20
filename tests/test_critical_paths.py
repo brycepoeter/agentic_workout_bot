@@ -18,6 +18,8 @@ The data-layer tests at the bottom require no LLM and run in milliseconds.
 They guard the search and fuzzy-match logic that both critical paths depend on.
 """
 
+import json
+
 import pytest
 from langchain_core.messages import HumanMessage
 
@@ -42,17 +44,20 @@ def test_log_routes_correctly():
 @pytest.mark.integration
 def test_log_extracts_sets_reps_weight():
     result = invoke("I just did 3x10 bench press at 185 lbs")
-    response = result["response"]
-    assert "3 sets" in response
-    assert "10 reps" in response
-    assert "185" in response
+    data = json.loads(result["response"])
+    entry = data["logged"][0]
+    assert entry["sets"] == 3
+    assert entry["reps"] == 10
+    assert entry["weight_lbs"] == 185
 
 
 @pytest.mark.integration
 def test_log_fuzzy_matches_exercise():
     result = invoke("I just did 3x10 bench press at 185 lbs")
-    response = result["response"].lower()
-    assert "bench" in response or "press" in response
+    data = json.loads(result["response"])
+    entry = data["logged"][0]
+    matched = (entry.get("matched_name") or entry["exercise_name_raw"]).lower()
+    assert "bench" in matched or "press" in matched
 
 
 # ── Critical Path 2: Generator graceful degradation ───────────────────────────
@@ -152,3 +157,32 @@ def test_bodyweight_search_returns_only_no_equipment():
     bodyweight = [e for e in all_exercises if not e.equipment_required]
     assert len(bodyweight) > 0
     assert all(not e.equipment_required for e in bodyweight)
+
+
+# ── Logger JSON output unit tests (no LLM) ────────────────────────────────────
+
+def test_logger_format_response_json():
+    from fitness_coach.agents.logger import LogEntry, _format_response
+    entry = LogEntry(
+        exercise_name_raw="bench press",
+        matched_name="Barbell Flat Bench Press",
+        matched_id="some-uuid",
+        sets=3,
+        reps=10,
+        weight_lbs=185.0,
+    )
+    output = json.loads(_format_response([entry]))
+    assert "logged" in output
+    logged = output["logged"]
+    assert len(logged) == 1
+    assert logged[0]["sets"] == 3
+    assert logged[0]["reps"] == 10
+    assert logged[0]["weight_lbs"] == 185.0
+    assert logged[0]["matched_name"] == "Barbell Flat Bench Press"
+
+
+def test_logger_format_response_empty():
+    from fitness_coach.agents.logger import _format_response
+    output = json.loads(_format_response([]))
+    assert output["logged"] == []
+    assert "message" in output
