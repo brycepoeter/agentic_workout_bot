@@ -1,6 +1,8 @@
 import json
 from functools import lru_cache
 
+from pydantic import ValidationError
+
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
@@ -167,7 +169,14 @@ def build_workout(warmup: list, main: list, cooldown: list) -> str:
     for label, items in [("warmup", warmup), ("main", main), ("cooldown", cooldown)]:
         resolved = []
         for raw in items:
-            item = WorkoutExercise.model_validate(raw)
+            try:
+                item = WorkoutExercise.model_validate(raw)
+            except ValidationError as exc:
+                return json.dumps({
+                    "error": f"Invalid exercise schema in '{label}': {exc.error_count()} field error(s). "
+                             "Each exercise needs exercise_id (string) and sets (int). "
+                             f"Details: {exc.errors()[0]['msg']} on field '{exc.errors()[0]['loc'][0]}'."
+                })
             ex = data.EXERCISE_BY_ID.get(item.exercise_id)
             if not ex:
                 return json.dumps({
