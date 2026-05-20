@@ -2,6 +2,7 @@ import json
 from functools import lru_cache
 
 from langchain_core.messages import SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import MessagesState
@@ -252,7 +253,7 @@ _CONTEXT_SYSTEM = SystemMessage(
 )
 
 
-def run(state: AgentState) -> dict:
+def run(state: AgentState, config: RunnableConfig | None = None) -> dict:
     """Pre-check (fast model) then tool-calling loop (smart model)."""
     assessment: _WorkoutContext = get_fast_llm().with_structured_output(_WorkoutContext).invoke(
         [_CONTEXT_SYSTEM, *state["messages"]]
@@ -271,6 +272,6 @@ def run(state: AgentState) -> dict:
 
     result = build().invoke(
         {"messages": state["messages"]},
-        {"recursion_limit": 12},
+        {**(config or {}), "recursion_limit": 12},
     )
     return {"response": result["messages"][-1].content}
